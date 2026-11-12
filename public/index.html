@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="da">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chat test</title>
+    <style>
+      :root {
+        --bg: #f5f5f4;
+        --card: #ffffff;
+        --text: #1c1917;
+        --muted: #78716c;
+        --line: #e7e5e4;
+        --accent: #2563eb;
+        --mine: #dbeafe;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      main {
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 24px 16px;
+        display: grid;
+        gap: 12px;
+      }
+      h1 { font-size: 20px; margin: 0; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+      label { font-size: 13px; color: var(--muted); }
+      select, input, button {
+        font: inherit;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--card);
+      }
+      input { flex: 1; min-width: 0; }
+      button { background: var(--accent); color: #fff; border: none; cursor: pointer; }
+      #status { font-size: 13px; color: var(--muted); }
+      #messages {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+        height: 50vh;
+        overflow-y: auto;
+        display: grid;
+        align-content: start;
+        gap: 8px;
+      }
+      .msg { padding: 8px 10px; border-radius: 10px; background: var(--bg); max-width: 85%; }
+      .msg.mine { background: var(--mine); justify-self: end; }
+      .msg small { display: block; color: var(--muted); font-size: 12px; margin-bottom: 2px; }
+      .empty { color: var(--muted); font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Chat test</h1>
+      <div id="status">Forbinder...</div>
+
+      <div class="row">
+        <label for="user">Skriv som</label>
+        <select id="user"></select>
+        <label for="thread">Tråd</label>
+        <select id="thread"></select>
+      </div>
+
+      <div id="messages"><p class="empty">Vælg en tråd.</p></div>
+
+      <form id="form" class="row">
+        <input id="content" placeholder="Skriv en besked" autocomplete="off" />
+        <button type="submit">Send</button>
+      </form>
+    </main>
+
+    <!-- socket.io-serveren i NestJS leverer selv klientbiblioteket -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      const userSelect = document.getElementById('user');
+      const threadSelect = document.getElementById('thread');
+      const list = document.getElementById('messages');
+      const status = document.getElementById('status');
+      let currentThread = null;
+
+      const socket = io();
+      socket.on('connect', () => (status.textContent = 'Forbundet via WebSocket'));
+      socket.on('disconnect', () => (status.textContent = 'Forbindelsen er tabt'));
+
+      // Nye beskeder kommer kun via WebSocket, også dem du selv sender
+      socket.on('newMessage', (message) => {
+        if (message.thread.id === currentThread) addMessage(message);
+      });
+
+      function addMessage(message) {
+        list.querySelector('.empty')?.remove();
+        const div = document.createElement('div');
+        div.className = 'msg' + (String(message.author.id) === userSelect.value ? ' mine' : '');
+        const meta = document.createElement('small');
+        meta.textContent = `${message.author.username} · ${new Date(message.createdAt).toLocaleTimeString('da-DK')}`;
+        div.append(meta, document.createTextNode(message.content));
+        list.append(div);
+        list.scrollTop = list.scrollHeight;
+      }
+
+      function fillSelect(select, items, label) {
+        select.innerHTML = '';
+        for (const item of items) select.add(new Option(label(item), item.id));
+      }
+
+      async function openThread(id) {
+        if (currentThread !== null) socket.emit('leaveThread', currentThread);
+        currentThread = id;
+        socket.emit('joinThread', id);
+        const messages = await fetch(`/messages?threadId=${id}`).then((r) => r.json());
+        list.innerHTML = '';
+        if (messages.length === 0) list.innerHTML = '<p class="empty">Ingen beskeder endnu.</p>';
+        messages.forEach(addMessage);
+      }
+
+      async function init() {
+        const [users, threads] = await Promise.all([
+          fetch('/users').then((r) => r.json()),
+          fetch('/threads').then((r) => r.json()),
+        ]);
+        if (users.length === 0 || threads.length === 0) {
+          list.innerHTML = '<p class="empty">Opret mindst én user og én tråd først (Bruno eller seed.sql).</p>';
+          return;
+        }
+        fillSelect(userSelect, users, (u) => u.username);
+        fillSelect(threadSelect, threads, (t) => t.title);
+        await openThread(Number(threadSelect.value));
+      }
+
+      threadSelect.addEventListener('change', () => openThread(Number(threadSelect.value)));
+      userSelect.addEventListener('change', () => openThread(currentThread));
+
+      document.getElementById('form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const input = document.getElementById('content');
+        const content = input.value.trim();
+        if (!content || currentThread === null) return;
+        input.value = '';
+        await fetch('/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content,
+            authorId: Number(userSelect.value),
+            threadId: currentThread,
+          }),
+        });
+      });
+
+      init();
+    </script>
+  </body>
+</html>

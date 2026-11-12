@@ -1,0 +1,25 @@
+info:
+  name: create thread
+  type: http
+  seq: 3
+
+http:
+  method: POST
+  url: http://localhost:3000/threads
+  body:
+    type: json
+    data: |-
+      {
+        "title": "Fredagsbar",
+        "participantIds": [
+          1,
+          2
+        ]
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
